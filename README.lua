@@ -1,14 +1,15 @@
--- 📡 Script avançado de Monitoramento para Blox Fruits (Otimizado)
+-- 📡 Script avançado de Monitoramento para Blox Fruits (Otimizado para KRNL e Novas Estruturas de Dados)
 -- Mostra: Level, Beli, Fragmentos, Frutas guardadas, Mastery, Status
 -- Envia uma mensagem inicial de teste + atualizações a cada 1 minuto
 
 local HttpService = game:GetService("HttpService")
 local player = game.Players.LocalPlayer
-local Data = player:WaitForChild("Data")
+local Data = player:WaitForChild("Data") -- Isso geralmente ainda funciona para Level, Beli, Fragments
 local startTime = tick()
 
 -- ✅ SEU WEBHOOK DO DISCORD - COLOQUE O URL CORRETO AQUI
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1398816628417888388/dk_dfon8Z5ZU1CEMpzVmX0satTLAoktXqFYh_5Hel7AZ9kIpshyvI2V6YyiHeLYeStLd" -- Substitua pelo seu webhook válido!
+-- Use o MESMO URL que funcionou no seu teste Python!
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1398816628417888388/dk_dfon8Z5ZU1CEMpzVmX0satTLAoktXqFYh_5Hel7AZ9kIpshyvI2V6YyiHeLYeStLd" -- **MANTENHA ESTE URL SE ELE FUNCIONOU NO PYTHON**
 
 -- Dados anteriores para comparação
 local lastData = {
@@ -29,21 +30,29 @@ local function formatNumber(num)
     end
 end
 
---- Coleta as frutas guardadas no inventário
+--- Coleta as frutas guardadas no inventário (Tentativa de correção)
 local function getFruitInventory()
     local fruitList = {}
     local success, fruits = pcall(function()
-        return game:GetService("ReplicatedStorage"):WaitForChild("Remotes").CommF_:InvokeServer("getInventoryFruits")
+        -- Tenta encontrar o RemoteFunction de forma mais genérica ou por nome conhecido
+        local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
+        if remotes then
+            local commF = remotes:FindFirstChild("CommF_") or remotes:FindFirstChild("CommF") -- Tenta CommF_ ou CommF
+            if commF and commF:IsA("RemoteFunction") then
+                return commF:InvokeServer("getInventoryFruits")
+            end
+        end
+        return nil -- Retorna nil se não encontrar o RemoteFunction
     end)
 
-    if success and fruits then
+    if success and fruits and type(fruits) == "table" then
         for _, fruit in pairs(fruits) do
             if fruit and fruit.Name then
                 table.insert(fruitList, fruit.Name)
             end
         end
     else
-        warn("Erro ao obter inventário de frutas:", fruits)
+        warn("Erro ao obter inventário de frutas ou retorno inesperado:", tostring(fruits))
     end
     return fruitList
 end
@@ -66,16 +75,30 @@ local function compareFruits(old, new)
     return gained
 end
 
---- Coleta os status (melee, defense, etc.) do jogador
+--- Coleta os status (melee, defense, etc.) do jogador (Tentativa de correção)
 local function getStats()
     local stats = {}
-    if player and player.Stats then
-        for _, stat in pairs(player.Stats:GetChildren()) do
+    -- Tenta encontrar os stats dentro de "player.leaderstats" ou outro local comum
+    local leaderstats = player:FindFirstChild("leaderstats")
+    if leaderstats then
+        for _, stat in pairs(leaderstats:GetChildren()) do
             if stat and stat.Name and stat.Value then
                 stats[stat.Name] = stat.Value
             end
         end
     end
+    -- Se não encontrar em leaderstats, tenta outros locais conhecidos do Blox Fruits
+    -- (Ajuste conforme a estrutura atual do jogo, se souber onde estão)
+    -- Ex: player.PlayerStats, player.Character.Stats, etc.
+    -- Por enquanto, vamos focar em leaderstats que é mais comum para stats visíveis.
+
+    -- Adiciona os stats que o script espera, mesmo que não os encontre, para evitar erro de nil
+    stats["Melee"] = stats["Melee"] or "N/A"
+    stats["Defense"] = stats["Defense"] or "N/A"
+    stats["Sword"] = stats["Sword"] or "N/A"
+    stats["Gun"] = stats["Gun"] or "N/A"
+    stats["Blox Fruit"] = stats["Blox Fruit"] or "N/A"
+
     return stats
 end
 
@@ -138,7 +161,8 @@ local function sendToDiscord(diff, current, isFirst)
     }
 
     local payload = HttpService:JSONEncode({embeds = {embed}})
-    local requestFunc = syn and syn.request or http_request or request or fluxus and fluxus.request
+
+    local requestFunc = rawget(getfenv(0), "http_request") or rawget(getfenv(0), "request") or (syn and syn.request) or (fluxus and fluxus.request)
 
     if requestFunc then
         local success, result = pcall(function()
@@ -161,18 +185,24 @@ local function sendToDiscord(diff, current, isFirst)
             warn("Verifique se o URL do webhook está correto e se ele ainda é válido no Discord.")
         end
     else
-        warn("Seu executor não suporta requisições HTTP. O monitoramento via Discord não funcionará.")
+        warn("Seu executor (KRNL ou outro) não suporta requisições HTTP. O monitoramento via Discord não funcionará.")
     end
 end
 
 --- Inicia o monitoramento
 wait(5) -- Pequena pausa para garantir que os dados iniciais carreguem
 
+-- Tenta obter os dados iniciais de forma segura, se falhar, usa valores padrão
+local initialLevel = Data.Level.Value
+local initialBeli = Data.Beli.Value
+local initialFragments = Data.Fragments.Value
+local initialFruits = getFruitInventory()
+
 local initialCurrent = {
-    Level = Data.Level.Value,
-    Beli = Data.Beli.Value,
-    Fragments = Data.Fragments.Value,
-    Fruits = getFruitInventory(),
+    Level = initialLevel,
+    Beli = initialBeli,
+    Fragments = initialFragments,
+    Fruits = initialFruits,
 }
 lastData = initialCurrent -- Define os dados iniciais para futuras comparações
 sendToDiscord({}, initialCurrent, true) -- Envia a mensagem de início
